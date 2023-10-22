@@ -1,0 +1,376 @@
+PROGRAM myPATH
+----------------------------------------------------
+-- Creation date: 2023.10.18
+-- Created by: 
+----------------------------------------------------
+-- Version: 0.0.0.0 - 00
+----------------------------------------------------
+-- Function: 尝试使用socket远程控制机械臂运动
+----------------------------------------------------
+-- Last modified: 2023.04.05
+-- Last modified by:                              
+----------------------------------------------------
+%COMMENT = '远程控制机械臂运动1.0'
+%NOLOCKGROUP --解除所有组锁定
+%NOPAUSESHFT --忽略示教器shift键
+%NOPAUSE = ERROR + COMMAND + TPENABLE --忽略终止
+%NOABORT = ERROR + COMMAND + TPENABLE 
+%NOBUSYLAMP --忽略程序状态 UO输出
+CONST
+    tag_name = 'S3:' 
+TYPE
+    -- L P[1] 300mm/s FINE  L动作类型 P[1] 点位数据 速度 FINE定位类型
+    motn_cfg = STRUCTURE
+        motype:INTEGER --motiontype运动类型
+        pos_ :XYZWPR --位置信息
+        speed:REAL   --线性速度XYZ mm/s
+        rotspeed:REAL --旋转速度 deg/s 角度/秒
+        termtype:INTEGER --定位类型
+        pos_type:INTEGER --位置类型 （绝对位置，相对位置）
+        offset_mode:INTEGER -- 当pos_type为（相对位置）时，此数据才有效 相对用户 相对工具 单轴
+    ENDSTRUCTURE
+VAR
+-- L P[1] 300mm/s FINE  L动作类型 P[1] 点位数据 速度 FINE定位类型
+    status:INTEGER
+    --定义一个文件类型，用于传送文件
+    myfile:FILE
+    s_str:STRING[1] --在读取时，对单个字符进行读取
+    con_str:STRING[128] --限定了每次读取内容的长度 字节为单位 一个数字/英文字母/英文标点 均为一个字节
+    n_bytes:INTEGER
+    user_motn:motn_cfg
+    cfg_status:INTEGER
+    lock_status:INTEGER
+    tag_pos:XYZWPR
+    tag_pos2:XYZWPR
+    tag_pos3:XYZWPR
+    check_status:INTEGER
+    free_status:INTEGER
+    SUB_STR_status:INTEGER
+    Karel_pos:XYZWPR
+    Karel_pos_cnv_status:INTEGER
+    pos_equal_karelpos_status:INTEGER
+    LotsMove_status:INTEGER --用于监测是否是多位置运动 为0表示开始多点运动
+    --TP程序
+    jpos:JOINTPOS -- TP运动的jpos点位信息
+    pos:XYZWPR -- TP运动的xyzwpr点位信息
+    real_array:ARRAY [6] OF REAL --保存TP程序运行时 jpos和xyzwpr之间的转换
+    tp_status:INTEGER -- 保存TP程序的运行中 转换过程中状态
+
+    sjqMoveLength:INTEGER --sjq运动TP程序的运动距离
+    sjqMoveJNUM:INTEGER --sjq运动TP程序的轴数
+    CA2B_A:ARRAY [6] OF REAL --直线焊接 A点系列坐标 J轴
+    CA2B_B:ARRAY [6] OF REAL --直线焊接 B点系列坐标 J轴
+    sjxPOS1:XYZWPR --用来在示教器运动 XYZWPR版本中存储XYZWPR坐标
+    temp_jpos:JOINTPOS --临时保存jpos格式的位置
+    sjxMoveLength:REAL --sjx在XYZWPR轴的运动记录长度
+
+    tolPOS1:XYZWPR -- 基于工具坐标系的移动
+    tolMoveLength:REAL --tol相对工具坐标偏移运动TP程序的运动距离
+    NOWXYZWPR:XYZWPR --永远存储当前坐标 与PR15对应
+
+--函数头文件声明
+--Karel匹配TPE坐标系，设定点位信息（位置 速度 定位类型 动作类型）
+ROUTINE set_motn_cfg(user_cfg:motn_cfg;cfg_status:INTEGER) FROM myPATH
+
+--SOCKET断开程序主体结构
+--此处tag_name为局部变量 与上面的CONST没有联系
+ROUTINE MSG_DISCON(tag_name:STRING)
+BEGIN
+    MSG_DISCO(tag_name,status)
+END MSG_DISCON
+
+--SOCKET连接程序主体结构
+--此处tag_name为局部变量 与上面的CONST没有联系
+ROUTINE MSG_CON(tag_name:STRING)
+BEGIN
+    MSG_CONNECT(tag_name,status)
+    --等于0表示没出问题
+    IF status <> 0 THEN
+    --此处为CONST全局变量  
+    --断开连接
+        MSG_DISCON(tag_name)
+        MSG_CONNECT(tag_name,status)
+        IF status <> 0 THEN
+        --如果仍不为零，则通信协议可能出问题了（因为操作没问题）
+            POST_ERR(status,'',0, 1)
+            --终止程序
+            ABORT
+        ENDIF    
+    ENDIF
+END MSG_CON
+
+
+----------------------------------------------------
+-- BEGIN final_socket_motion                             
+----------------------------------------------------
+BEGIN
+    --连接套接字 此处为CONST
+    MSG_CON(tag_name)
+    --绑定文件端口 用于传送数据
+    --设定文件属性 
+    SET_FILE_ATR(myfile,ATR_IA) --ATR_IA不用回车，数据也能立即发送 保证数据实时性 无CR 立即输出
+    SET_FILE_ATR(myfile,ATR_READAHD,2) --130页 2为指定缓存区为256字节
+    OPEN FILE myfile('RW',tag_name) -- RW 覆盖写入
+    status =  IO_STATUS(myfile) --使用IO_STATUS 查看文件打开状态是否良好
+    IF status <> 0 THEN --出错了
+        CLOSE FILE myfile --先将文件关闭
+        CLR_IO_STAT(myfile) --清除文件状态
+        OPEN FILE myfile('RW',tag_name) --随后再次打开文件
+    ENDIF
+    --文件已经绑定了S3
+    WRITE myfile('Connect Successful!') -- 4-4日 作为服务器 发送成功
+    -- 上面这行输出的内容 就是在客户端的接收内容
+
+    --Buffer内的数据判断
+    LABEL_1:: --死循环
+    BYTES_AHEAD(myfile,n_bytes,status) --n_bytes保存了字节数
+    --返回目前在KAREL文件的预读缓冲区中的输入数据的字节数。
+    --允许 KAREL 程序立即检查是否已从串行端口收到数据并可由程序读取。
+    --BYTES_AHEAD也被支持在套接字信息传递和管道。
+    --myfile 打开的文件 n_bytes 是read_ahead缓冲区的字节数
+    IF (UNINIT(n_bytes)) THEN--判断是否为 未初始化状态 *uninit UNINIT(n_bytes)
+        n_bytes = 0 --
+    ENDIF
+
+    IF (n_bytes>0) AND (status=0) THEN  -- n_bytes>0说明缓存区已经有数据了
+        --初始化
+        con_str = ''
+        --开始读取数据
+        REPEAT --循环
+            s_str = ''
+            READ myfile(s_str::1) --数据长度为1
+            --每读取一个自减一次
+            n_bytes = n_bytes -1
+            --将读取的数据进行联合
+            con_str = con_str + s_str
+        UNTIL(n_bytes = 0) --代表数据读取完毕
+        --数据读取完毕 con_str中存放了本次阅读全部信息
+        WRITE TPDISPLAY(CHR(128),CHR(137)) --清屏
+        WRITE TPDISPLAY(con_str)--展示数据
+
+
+        
+        IF(SUB_STR(con_str,1,6)) = 'getPos' THEN
+            --获取当前位置
+            jpos = CURJPOS(0,0)
+            WRITE myfile(jpos)
+            pos = CURPOS(0,0)
+            WRITE myfile(pos)
+        ENDIF
+        IF(SUB_STR(con_str,1,6)) = 'getTcp' THEN
+            --获取当前位置
+            CALL_PROG('getTcp',tp_status)
+            pos = GET_POS_REG(70, tp_status,0)
+            WRITE myfile(pos)
+        ENDIF
+
+        IF SUB_STR(con_str,1,1) = 'C' THEN --前1个字符是CallTP 表示进入运动程序
+            WRITE myfile('CallTP Program')
+            IF SUB_STR(con_str,2,2) ='Bo' THEN --回到安全点
+                jpos = CURJPOS(0,0)
+                --初始化real_array为安全点
+                real_array[1] = 0
+                real_array[2] = 0
+                real_array[3] = 0
+                real_array[4] = 0
+                real_array[5] = -90
+                real_array[6] = 0
+                CNV_REL_JPOS(real_array,jpos,tp_status)
+                SET_JPOS_REG(11,jpos,tp_status)
+                CALL_PROG('sjqMove',tp_status)
+            ENDIF
+
+            IF SUB_STR(con_str,2,4) ='AtB-' THEN --直线焊接 活点
+            --输入规范 CAtB- +000.000 +000.000 +000.000 +000.000 +000.000 +000.000 X +000.000
+                        --                A点坐标                                     B点坐标
+                --CA2B_A 数组记录A点的六个坐标，其类型为REAL 包括了正负号
+                CNV_STR_REAL(SUB_STR(con_str,6,9),CA2B_A[1])
+                CNV_STR_REAL(SUB_STR(con_str,15,9),CA2B_A[2])
+                CNV_STR_REAL(SUB_STR(con_str,24,9),CA2B_A[3])
+                CNV_STR_REAL(SUB_STR(con_str,33,9),CA2B_A[4])
+                CNV_STR_REAL(SUB_STR(con_str,42,9),CA2B_A[5])
+                CNV_STR_REAL(SUB_STR(con_str,51,9),CA2B_A[6])
+
+                --CA2B_B 数组记录B点的六个坐标，其类型为REAL 包括了正负号
+                CNV_STR_REAL(SUB_STR(con_str,61,9),CA2B_B[1])
+                CNV_STR_REAL(SUB_STR(con_str,70,9),CA2B_B[2])
+                CNV_STR_REAL(SUB_STR(con_str,79,9),CA2B_B[3])
+                CNV_STR_REAL(SUB_STR(con_str,88,9),CA2B_B[4])
+                CNV_STR_REAL(SUB_STR(con_str,97,9),CA2B_B[5])
+                CNV_STR_REAL(SUB_STR(con_str,106,9),CA2B_B[6])
+
+                --初始化jpos
+                jpos = CURJPOS(0,0)
+                --初始化real_array为安全点
+                --存入1号PR寄存器 O点位置
+                -- real_array[1] = 0
+                -- real_array[2] = 0
+                -- real_array[3] = 0
+                -- real_array[4] = 0
+                -- real_array[5] = -90
+                -- real_array[6] = 0
+                -- CNV_REL_JPOS(real_array,jpos,tp_status)
+                -- SET_JPOS_REG(1,jpos,tp_status)
+                --存入4号PR寄存器 A点位置
+                CNV_REL_JPOS(CA2B_A,jpos,tp_status)
+                SET_JPOS_REG(4,jpos,tp_status)
+
+                CNV_REL_JPOS(CA2B_B,jpos,tp_status)
+                --存入5号PR寄存器 B点位置
+                SET_JPOS_REG(5,jpos,tp_status)
+                CALL_PROG('AtoB', tp_status)
+            ENDIF
+        ENDIF
+    -- C系列函数结束
+-- 书写规范 tol + 010.000 x   tol+010.000x
+        IF SUB_STR(con_str,1,3) = 'tol' THEN
+            CNV_STR_REAL(SUB_STR(con_str,4,8),tolMoveLength)
+            jpos = CURJPOS(0,0)
+            NOWXYZWPR = jpos
+            SET_POS_REG(10,NOWXYZWPR,tp_status)
+            IF (tp_status <> 0) THEN
+                WRITE myfile('ERROR IN tolPOS1 SET_POS_REG')
+                --随后手动示教 PR15
+            ENDIF
+
+        CALL_PROG('offestTool', tp_status)
+        ENDIF
+
+--输入规范： sjq   +      010          J3
+--              正向  三位数表示距离  哪个轴
+        IF SUB_STR(con_str,1,3) = 'sjq' THEN
+        --模拟示教器运动 微调 以J为轴
+            CNV_STR_INT(SUB_STR(con_str,5,3),sjqMoveLength)
+            CNV_STR_INT(SUB_STR(con_str,9,1),sjqMoveJNUM)
+            --收集到足够信息 开始操作
+            jpos = CURJPOS(0,0)
+            CNV_JPOS_REL(jpos,real_array,tp_status)
+            
+            IF SUB_STR(con_str,4,1) = '+' THEN
+                --正向运动
+                --sjqMoveDirection = 1
+                real_array[sjqMoveJNUM] = real_array[sjqMoveJNUM] + sjqMoveLength
+            ENDIF
+            IF SUB_STR(con_str,4,1) = '-' THEN
+                --负向运动
+                --sjqMoveDirection = 0
+                real_array[sjqMoveJNUM] = real_array[sjqMoveJNUM] - sjqMoveLength
+            ENDIF
+            CNV_REL_JPOS(real_array,jpos,tp_status)
+            SET_JPOS_REG(11,jpos,tp_status)
+            
+
+            CALL_PROG('sjqMove',tp_status)
+        ENDIF
+-- XYZWPR版本 XYZWPR版本 XYZWPR版本 XYZWPR版本
+--输入规范： sjx + 300.000 x   单位是mm
+        IF SUB_STR(con_str,1,3) = 'sjx' THEN --基于xyzwpr坐标系移动
+            CNV_STR_REAL(SUB_STR(con_str,4,8),sjxMoveLength)
+            temp_jpos = CURJPOS(0,0) --获取当前位置的XYZWPR坐标
+            sjxPOS1 = temp_jpos
+            WRITE myfile('sjxPOS1：')
+            WRITE myfile(sjxPOS1)
+            WRITE myfile('temp_jpos：')
+            WRITE myfile(temp_jpos)
+            --如果是加号
+            --IF SUB_STR(con_str,4,1) = '+' THEN
+                IF SUB_STR(con_str,12,1) = 'x' THEN
+                    sjxPOS1.x = sjxPOS1.x +sjxMoveLength
+                ENDIF
+                IF SUB_STR(con_str,12,1) = 'y' THEN
+                    sjxPOS1.y = sjxPOS1.y +sjxMoveLength
+                ENDIF
+                IF SUB_STR(con_str,12,1) = 'z' THEN
+                    sjxPOS1.z = sjxPOS1.z +sjxMoveLength
+                ENDIF
+                IF SUB_STR(con_str,12,1) = 'w' THEN
+                    sjxPOS1.w = sjxPOS1.w +sjxMoveLength
+                ENDIF
+                IF SUB_STR(con_str,12,1) = 'p' THEN
+                    sjxPOS1.p = sjxPOS1.p +sjxMoveLength
+                ENDIF
+                IF SUB_STR(con_str,12,1) = 'r' THEN
+                    sjxPOS1.r = sjxPOS1.r +sjxMoveLength
+                ENDIF
+            --ENDIF
+            --修正工具坐标系
+            sjxPOS1.x = sjxPOS1.x -0.012
+            sjxPOS1.y = sjxPOS1.y +0.001
+            sjxPOS1.z = sjxPOS1.z -89.045
+            --CNV_STR_CONF('nut000', sjxPOS1.config_data, tp_status)
+            SET_POS_REG(12,sjxPOS1,tp_status)
+            IF (tp_status <> 0) THEN
+                WRITE myfile('ERROR IN SET_POS_REG')
+            ENDIF
+            CALL_PROG('sjxMove',tp_status)   
+        ENDIF
+-- 移动到指定的XYZWPR点 moveXYZWPR +0000.000+0000.000
+        IF SUB_STR(con_str,1,10) = 'moveXYZWPR' THEN --基于xyzwpr坐标系移动
+            --temp_jpos = CURJPOS(0,0) --获取当前位置的XYZWPR坐标
+            CNV_STR_REAL(SUB_STR(con_str,11,9),sjxPOS1.x)
+            CNV_STR_REAL(SUB_STR(con_str,20,9),sjxPOS1.y)
+            CNV_STR_REAL(SUB_STR(con_str,29,9),sjxPOS1.z)
+            CNV_STR_REAL(SUB_STR(con_str,38,9),sjxPOS1.w)
+            CNV_STR_REAL(SUB_STR(con_str,47,9),sjxPOS1.p)
+            CNV_STR_REAL(SUB_STR(con_str,56,9),sjxPOS1.r)
+            --CNV_STR_CONF('nut000', sjxPOS1.config_data, tp_status)
+            sjxPOS1.config_data.CFG_TURN_NO1 = 0
+            sjxPOS1.config_data.CFG_TURN_NO1 = 0
+            sjxPOS1.config_data.CFG_TURN_NO2 = 0
+            sjxPOS1.config_data.CFG_TURN_NO2 = 0
+            sjxPOS1.config_data.CFG_TURN_NO3 = 0
+            sjxPOS1.config_data.CFG_TURN_NO3 = 0
+
+            sjxPOS1.config_data.CFG_FLIP = FALSE
+            sjxPOS1.config_data.CFG_FLIP = FALSE
+            sjxPOS1.config_data.CFG_UP = TRUE
+            sjxPOS1.config_data.CFG_UP = TRUE
+            sjxPOS1.config_data.CFG_FRONT = TRUE
+            sjxPOS1.config_data.CFG_FRONT = TRUE
+            SET_POS_REG(12,sjxPOS1,tp_status)
+            WRITE myfile(sjxPOS1)
+            IF (tp_status <> 0) THEN
+                WRITE myfile('ERROR IN SET_POS_REG')
+            ENDIF
+            CALL_PROG('sjxMove',tp_status)   
+        ENDIF
+
+-- 移动到指定的XYZWPR点 并根据 不带工具坐标系的位置信息 来移动movpXYZWPR +0000.000+0000.000
+        IF SUB_STR(con_str,1,10) = 'movpXYZWPR' THEN --基于xyzwpr坐标系移动
+            --temp_jpos = CURJPOS(0,0) --获取当前位置的XYZWPR坐标
+            CNV_STR_REAL(SUB_STR(con_str,11,9),sjxPOS1.x)
+            CNV_STR_REAL(SUB_STR(con_str,20,9),sjxPOS1.y)
+            CNV_STR_REAL(SUB_STR(con_str,29,9),sjxPOS1.z)
+            CNV_STR_REAL(SUB_STR(con_str,38,9),sjxPOS1.w)
+            CNV_STR_REAL(SUB_STR(con_str,47,9),sjxPOS1.p)
+            CNV_STR_REAL(SUB_STR(con_str,56,9),sjxPOS1.r)
+            --CNV_STR_CONF('nut000', sjxPOS1.config_data, tp_status)
+            sjxPOS1.config_data.CFG_TURN_NO1 = 0
+            sjxPOS1.config_data.CFG_TURN_NO1 = 0
+            sjxPOS1.config_data.CFG_TURN_NO2 = 0
+            sjxPOS1.config_data.CFG_TURN_NO2 = 0
+            sjxPOS1.config_data.CFG_TURN_NO3 = 0
+            sjxPOS1.config_data.CFG_TURN_NO3 = 0
+
+            sjxPOS1.config_data.CFG_FLIP = FALSE
+            sjxPOS1.config_data.CFG_FLIP = FALSE
+            sjxPOS1.config_data.CFG_UP = TRUE
+            sjxPOS1.config_data.CFG_UP = TRUE
+            sjxPOS1.config_data.CFG_FRONT = TRUE
+            sjxPOS1.config_data.CFG_FRONT = TRUE
+            SET_POS_REG(12,sjxPOS1,tp_status)
+            WRITE myfile(sjxPOS1)
+            IF (tp_status <> 0) THEN
+                WRITE myfile('ERROR IN SET_POS_REG')
+            ENDIF
+            CALL_PROG('sjxMoveP',tp_status)   
+        ENDIF
+
+        IF SUB_STR(con_str,1,4) = 'STOP' THEN
+            ABORT --终止程序
+        ENDIF
+    ENDIF
+    DELAY 100 --必须加入延迟，否则处于死循环中会导致机器人卡住
+    
+    GOTO LABEL_1
+END myPATH
