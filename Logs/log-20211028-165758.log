@@ -1,0 +1,9 @@
+载入系统耗时 0.5713076591491699 秒
+密码正确进入主页面
+1
+1
+../project/\1创建成功
+Traceback (most recent call last):
+  File "D:\develop\python\code\welding_gun_robot\src\ui\Ui_project_manage.py", line 200, in add_project
+    now_time = datetime.datetime.now().strftime('%F %T')
+AttributeError: type object 'datetime.datetime' has no attribute 'datetime'

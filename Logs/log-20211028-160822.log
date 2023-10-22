@@ -1,0 +1,6 @@
+Traceback (most recent call last):
+  File "D:/develop/python/code/welding_gun_robot/src/main.py", line 324, in <module>
+    star_progress = ProcessDialog()
+  File "D:\develop\python\code\welding_gun_robot\src\ui\ProcessDialog.py", line 14, in __init__
+    self.progressBar.setOrientation(Qt.Horizontal)  # 进度条的方向
+AttributeError: module 'PyQt5.Qt' has no attribute 'Horizontal'

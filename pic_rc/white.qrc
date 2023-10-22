@@ -1,0 +1,5 @@
+<RCC>
+  <qresource prefix="pic">
+    <file>白底.jpg</file>
+  </qresource>
+</RCC>

@@ -1,0 +1,32 @@
+<RCC>
+  <qresource prefix="pic">
+    <file>canshu.png</file>
+    <file>liebiao.png</file>
+    <file>login.jpg</file>
+    <file>moban.png</file>
+    <file>red.png</file>
+    <file>red2.png</file>
+    <file>ren111.png</file>
+    <file>shenhe.png</file>
+    <file>shuju.png</file>
+    <file>suo.png</file>
+    <file>suo2.png</file>
+    <file>user.png</file>
+    <file>user2.png</file>
+    <file>white.py</file>
+    <file>white.qrc</file>
+    <file>xiangzi.png</file>
+    <file>xiangzi2.png</file>
+    <file>白底.jpg</file>
+    <file>白底2.jpg</file>
+    <file>米色.png</file>
+    <file>背景2.jpg</file>
+    <file>背景3.jpg</file>
+    <file>首页.png</file>
+    <file>首页黄.png</file>
+    <file>原图.jpg</file>
+    <file>粉红.png</file>
+    <file>淡黄色.png</file>
+    <file>pic1.png</file>
+  </qresource>
+</RCC>

@@ -1,0 +1,6 @@
+载入系统耗时 3.9803078174591064 秒
+密码正确进入主页面
+Traceback (most recent call last):
+  File "D:\develop\python\code\welding_gun_robot\src\ui\Ui_project_manage.py", line 163, in add_project
+    project_name, creator = d.get_data()
+AttributeError: 'Ui_Dialog' object has no attribute 'get_data'

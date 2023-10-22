@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "D:/develop/python/code/welding_gun_robot/src/main.py", line 339, in <module>
+    Ui_project_manage = projectManage()
+  File "D:\develop\python\code\welding_gun_robot\src\ui\Ui_project_manage.py", line 44, in __init__
+    self.init_tableWidget_project_manage()
+  File "D:\develop\python\code\welding_gun_robot\src\ui\Ui_project_manage.py", line 76, in init_tableWidget_project_manage
+    Result = backend.M_Election.info_Query(tablename="Election_Info")
+NameError: name 'backend' is not defined

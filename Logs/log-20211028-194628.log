@@ -1,0 +1,4 @@
+Traceback (most recent call last):
+  File "D:/develop/python/code/welding_gun_robot/src/main.py", line 336, in <module>
+    projectManage.show_mainWindow_signal.connect(show_mainWindow)
+AttributeError: 'PyQt5.QtCore.pyqtSignal' object has no attribute 'connect'

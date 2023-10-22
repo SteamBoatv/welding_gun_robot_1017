@@ -1,0 +1,12 @@
+Traceback (most recent call last):
+  File "D:\develop\python\PyCharm Community Edition 2020.2.3\plugins\python-ce\helpers\pydev\pydevd.py", line 1448, in _exec
+    pydev_imports.execfile(file, globals, locals)  # execute the script
+  File "D:\develop\python\PyCharm Community Edition 2020.2.3\plugins\python-ce\helpers\pydev\_pydev_imps\_pydev_execfile.py", line 18, in execfile
+    exec(compile(contents+"\n", file, 'exec'), glob, loc)
+  File "D:/develop/python/code/welding_gun_robot/src/main.py", line 339, in <module>
+    Ui_project_manage = projectManage()
+  File "D:\develop\python\code\welding_gun_robot\src\ui\Ui_project_manage.py", line 49, in __init__
+    self.init_tableWidget_project_manage()
+  File "D:\develop\python\code\welding_gun_robot\src\ui\Ui_project_manage.py", line 88, in init_tableWidget_project_manage
+    now_time = project_list[i][1]
+IndexError: string index out of range

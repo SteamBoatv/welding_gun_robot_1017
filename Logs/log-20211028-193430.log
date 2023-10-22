@@ -1,0 +1,6 @@
+载入系统耗时 1.121805191040039 秒
+密码正确进入主页面
+Traceback (most recent call last):
+  File "D:/develop/python/code/welding_gun_robot/src/main.py", line 346, in <module>
+    Ui_project_manage.center()
+NameError: name 'Ui_project_manage' is not defined

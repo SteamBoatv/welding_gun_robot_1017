@@ -1,0 +1,9 @@
+载入系统耗时 0.5684130191802979 秒
+密码正确进入主页面
+123
+123
+../project/\123创建成功
+Traceback (most recent call last):
+  File "D:\develop\python\code\welding_gun_robot\src\ui\Ui_project_manage.py", line 185, in add_project
+    newItem.setTextAlignment(Qt.AlignHCenter | Qt.AlignVCenter)
+AttributeError: module 'PyQt5.Qt' has no attribute 'AlignHCenter'
